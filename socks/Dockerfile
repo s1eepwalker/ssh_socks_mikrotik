@@ -25,7 +25,7 @@ RUN ["/bin/busybox", "ln", "-s", "/bin/busybox", "/bin/echo"]
 RUN ["/bin/busybox", "ln", "-s", "/bin/busybox", "/bin/date"]
 RUN ["/bin/busybox", "ln", "-s", "/bin/busybox", "/bin/chmod"]
 RUN ["/bin/busybox", "ln", "-s", "/bin/busybox", "/bin/cat"]
-RUN ["/bin/busybox", "mkdir", "-p", "/etc/ssh", "/root/.ssh", "/tmp", "/var/log"]
+RUN ["/bin/busybox", "mkdir", "-p", "/etc/ssh", "/root/.ssh", "/tmp"]
 RUN ["/bin/busybox", "sh", "-c", "echo 'root:x:0:0:root:/root:/bin/sh' > /etc/passwd && echo 'root:x:0:' > /etc/group"]
 COPY entrypoint.sh /entrypoint.sh
 RUN ["/bin/busybox", "chmod", "+x", "/entrypoint.sh"]
