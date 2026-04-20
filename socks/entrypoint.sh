@@ -45,8 +45,13 @@ socks -p${PROXY_PORT} -i0.0.0.0
 EOF
 
   if [ -n "${HTTP_PORT}" ]; then
-    echo "parent 1000 socks5 127.0.0.1 ${SSH_TUNNEL_PORT}" >> ${CFG}
-    echo "proxy -p${HTTP_PORT} -i0.0.0.0" >> ${CFG}
+    {
+      echo "flush"
+      echo "auth strong"
+      echo "allow ${SOCKS_USER}"
+      echo "parent 1000 socks5 127.0.0.1 ${SSH_TUNNEL_PORT}"
+      echo "proxy -n -p${HTTP_PORT} -i0.0.0.0"
+    } >> ${CFG}
     echo "$(date) Starting 3proxy: SOCKS=${PROXY_PORT}, HTTP=${HTTP_PORT} (auth: ${SOCKS_USER})..."
   else
     echo "$(date) Starting 3proxy: SOCKS=${PROXY_PORT} (auth: ${SOCKS_USER})..."
