@@ -76,10 +76,11 @@ docker volume rm imgvol
 
 ## socks/ — SOCKS5 Proxy
 
-SOCKS5-прокси через SSH-туннель. Два режима работы:
+SOCKS5- и HTTP-прокси через SSH-туннель. Три режима работы:
 
-- **Без авторизации** — чистый SSH `-D` (совместим с Telegram, curl, браузерами)
-- **С авторизацией** — 3proxy + SSH-туннель (логин/пароль, для curl/браузеров; Telegram не поддерживается из-за ограничений 3proxy)
+- **Без авторизации** — чистый SSH `-D`, только SOCKS5 (совместим с Telegram, curl, браузерами)
+- **SOCKS с авторизацией** — 3proxy + SSH-туннель, SOCKS5 с логином/паролем (Telegram не поддерживается из-за ограничений 3proxy)
+- **SOCKS + HTTP с авторизацией** — то же, плюс HTTP-прокси на отдельном порту с теми же кредами (задаётся переменной `HTTP_PORT`)
 
 ### Настройка на MikroTik
 
@@ -94,40 +95,52 @@ SOCKS5-прокси через SSH-туннель. Два режима рабо�
 /container envs add name=socks-env key=SSH_PORT value="22"
 /container envs add name=socks-env key=SOCKS_PORT value="1080"
 /container envs add name=socks-env key=SSH_KEY value="id_ed25519"
-# Опционально — включить авторизацию:
+# Опционально — включить авторизацию (SOCKS):
 # /container envs add name=socks-env key=SOCKS_USER value="myuser"
 # /container envs add name=socks-env key=SOCKS_PASS value="mypassword"
+# Опционально — включить HTTP-прокси (требует SOCKS_USER/SOCKS_PASS):
+# /container envs add name=socks-env key=HTTP_PORT value="3128"
 
 # Контейнер
 /container add file=socks-tunnel.tar.gz interface=veth-socks envlist=socks-env mounts=ssh-key start-on-boot=yes
 
-# DST-NAT (локальная сеть)
+# DST-NAT SOCKS (локальная сеть)
 /ip firewall nat add chain=dstnat dst-port=1080 protocol=tcp src-address=192.168.88.0/24 action=dst-nat to-addresses=192.168.254.8 to-ports=1080
 
-# DST-NAT (внешний доступ)
+# DST-NAT SOCKS (внешний доступ)
 /ip firewall nat add chain=dstnat dst-port=1080 protocol=tcp in-interface=ether1 action=dst-nat to-addresses=192.168.254.8 to-ports=1080
+
+# DST-NAT HTTP (локальная сеть) — если задан HTTP_PORT
+# /ip firewall nat add chain=dstnat dst-port=3128 protocol=tcp src-address=192.168.88.0/24 action=dst-nat to-addresses=192.168.254.8 to-ports=3128
+
+# DST-NAT HTTP (внешний доступ) — если задан HTTP_PORT
+# /ip firewall nat add chain=dstnat dst-port=3128 protocol=tcp in-interface=ether1 action=dst-nat to-addresses=192.168.254.8 to-ports=3128
 ```
 
 ### Переменные окружения
 
-| Переменная   | По умолчанию  | Описание                              |
-|--------------|---------------|---------------------------------------|
-| `SSH_HOST`   | —             | Адрес удалённого сервера              |
-| `SSH_USER`   | `root`        | Пользователь SSH                      |
-| `SSH_PORT`   | `22`          | Порт SSH                              |
-| `SOCKS_PORT` | `1080`        | Порт SOCKS-прокси                     |
-| `SSH_KEY`    | `id_ed25519`  | Имя файла ключа в `/ssh`             |
-| `SOCKS_USER` | —             | Логин SOCKS5 (без — auth отключён)   |
-| `SOCKS_PASS` | —             | Пароль SOCKS5                         |
+| Переменная   | По умолчанию  | Описание                                                      |
+|--------------|---------------|---------------------------------------------------------------|
+| `SSH_HOST`   | —             | Адрес удалённого сервера                                      |
+| `SSH_USER`   | `root`        | Пользователь SSH                                              |
+| `SSH_PORT`   | `22`          | Порт SSH                                                      |
+| `SOCKS_PORT` | `1080`        | Порт SOCKS-прокси                                             |
+| `SSH_KEY`    | `id_ed25519`  | Имя файла ключа в `/ssh`                                     |
+| `SOCKS_USER` | —             | Логин (общий для SOCKS и HTTP; без — auth отключён)          |
+| `SOCKS_PASS` | —             | Пароль                                                        |
+| `HTTP_PORT`  | —             | Порт HTTP-прокси (без — HTTP выключен; требует `SOCKS_USER`) |
 
 ### Проверка
 
 ```bash
-# Без авторизации
+# SOCKS без авторизации
 curl -x socks5://192.168.88.1:1080 https://ifconfig.me
 
-# С авторизацией
+# SOCKS с авторизацией
 curl -x socks5://myuser:mypassword@192.168.88.1:1080 https://ifconfig.me
+
+# HTTP с авторизацией (если задан HTTP_PORT)
+curl -x http://myuser:mypassword@192.168.88.1:3128 https://ifconfig.me
 ```
 
 ---
