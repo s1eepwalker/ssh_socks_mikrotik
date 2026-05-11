@@ -93,20 +93,5 @@ for d in /proc/sys/net/ipv4/conf/*/; do
   fi
 done
 
-echo "$(date) policy routing ready"
-
-# Диагностика и фикс FORWARD-цепочки через nft (iptables-shim в namespace падает,
-# nft напрямую — основной канал в byedpi-контейнере, должен сработать).
-echo "$(date) nft list ruleset:"
-nft list ruleset 2>&1 | head -50 || echo "$(date) WARN: nft list failed"
-
-# Пытаемся снять FORWARD-policy DROP, если такая цепочка есть в filter.
-# Несколько вариантов нэймспейса — пробуем основные.
-for table_family in "inet filter" "ip filter"; do
-  nft 'chain '"${table_family}"' forward { policy accept; }' 2>&1 \
-    && echo "$(date) FORWARD policy=accept set on ${table_family}" \
-    && break || true
-done
-
-echo "$(date) waiting on hev-socks5-tunnel..."
+echo "$(date) policy routing ready, waiting on hev-socks5-tunnel..."
 wait ${HEV_PID}
