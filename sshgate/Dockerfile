@@ -1,22 +1,26 @@
-FROM alpine:3.20 AS build-hev
-RUN apk add --no-cache build-base git linux-headers
+FROM alpine:3.20 AS build
+RUN apk add --no-cache build-base git linux-headers openssl-dev openssh-client iproute2-minimal
+
+# hev-socks5-tunnel
 RUN git clone --recursive --depth 1 https://github.com/heiher/hev-socks5-tunnel.git /hev && \
     cd /hev && make && strip bin/hev-socks5-tunnel
 
-FROM alpine:3.20 AS build-3proxy
-RUN apk add --no-cache build-base git
+# 3proxy
 RUN git clone --depth 1 https://github.com/3proxy/3proxy.git /3proxy && \
     cd /3proxy && make -f Makefile.Linux && strip bin/3proxy
 
-FROM alpine:3.20 AS build
-RUN apk add --no-cache openssh-client iproute2-minimal
+# Сборка списка нужных файлов + ldd-зависимости
 RUN mkdir /out && \
     cp /usr/bin/ssh /out/ && \
     cp /bin/busybox /out/ && \
     cp /sbin/ip /out/ && \
-    ldd /usr/bin/ssh | awk '/=>/{print $3}' | xargs -I{} cp {} /out/ && \
-    ldd /bin/busybox | awk '/=>/{print $3}' | xargs -I{} cp -n {} /out/ && \
-    ldd /sbin/ip | awk '/=>/{print $3}' | xargs -I{} cp -n {} /out/ && \
+    cp /hev/bin/hev-socks5-tunnel /out/ && \
+    cp /3proxy/bin/3proxy /out/ && \
+    ldd /usr/bin/ssh              | awk '/=>/{print $3}' | xargs -I{} cp {} /out/ && \
+    ldd /bin/busybox              | awk '/=>/{print $3}' | xargs -I{} cp -n {} /out/ && \
+    ldd /sbin/ip                  | awk '/=>/{print $3}' | xargs -I{} cp -n {} /out/ && \
+    ldd /hev/bin/hev-socks5-tunnel| awk '/=>/{print $3}' | xargs -I{} cp -n {} /out/ && \
+    ldd /3proxy/bin/3proxy        | awk '/=>/{print $3}' | xargs -I{} cp -n {} /out/ && \
     cp /lib/ld-musl-*.so.1 /out/
 
 FROM scratch
@@ -25,8 +29,8 @@ COPY --from=build /out/lib*.so* /lib/
 COPY --from=build /out/ssh /usr/bin/ssh
 COPY --from=build /out/ip /sbin/ip
 COPY --from=build /out/busybox /bin/busybox
-COPY --from=build-hev /hev/bin/hev-socks5-tunnel /usr/bin/hev-socks5-tunnel
-COPY --from=build-3proxy /3proxy/bin/3proxy /usr/bin/3proxy
+COPY --from=build /out/hev-socks5-tunnel /usr/bin/hev-socks5-tunnel
+COPY --from=build /out/3proxy /usr/bin/3proxy
 RUN ["/bin/busybox", "ln", "-s", "/bin/busybox", "/bin/sh"]
 RUN ["/bin/busybox", "ln", "-s", "/bin/busybox", "/bin/sleep"]
 RUN ["/bin/busybox", "ln", "-s", "/bin/busybox", "/bin/echo"]
