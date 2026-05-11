@@ -8,6 +8,7 @@
 |-----------|----------|--------|
 | [socks/](socks/) | SOCKS5-прокси (SSH -D), опционально с авторизацией через 3proxy | ~3.5 МБ |
 | [mtg/](mtg/) | MTProto Proxy для Telegram, маскировка под TLS для обхода DPI | ~8 МБ |
+| [route/](route/) | Прозрачный L3-gateway: маркированный TCP MikroTik → SOCKS5 → SSH-туннель с фолбэком | ~4 МБ |
 
 ---
 
@@ -194,3 +195,75 @@ MTProto Proxy с маскировкой под TLS для обхода DPI. Тр
 ```
 https://t.me/proxy?server=ВАШ_ПУБЛИЧНЫЙ_IP&port=443&secret=СЕКРЕТ_ИЗ_ЛОГА
 ```
+
+---
+
+## route/ — Прозрачный L3-роутинг через SSH-туннель
+
+L3-gateway для MikroTik. Маркированный по `dst-address-list` TCP-трафик заворачивается в SOCKS5 поверх SSH-туннеля на удалённый сервер. Поддерживает список SSH-серверов с автоматическим фолбэком при падении активного.
+
+Внутри:
+- `ssh -N -D 127.0.0.1:1080` (в фоне, с реконнектом и перебором серверов из `SSH_HOSTS`)
+- `hev-socks5-tunnel` (~330KB) — терминирует TCP с TUN-устройства и форвардит через локальный SOCKS5
+- Policy routing внутри namespace: forwarded трафик → `tun0`; собственный SSH-исходящий → main table
+
+**Только TCP.** SSH `-D` не поддерживает UDP. Для UDP-сценариев (QUIC, игры) нужен отдельный канал.
+
+### Настройка на MikroTik
+
+```routeros
+# veth (адрес не должен пересекаться с другими контейнерами)
+/interface veth add name=veth-route address=192.168.254.10/24 gateway=192.168.254.1
+/interface bridge port add bridge=Bridge-Docker interface=veth-route
+
+# Переменные окружения
+/container envs add name=route-env key=SSH_HOSTS value="ams.example.com:2222,bishkek.example.com"
+/container envs add name=route-env key=SSH_USER value="user1"
+/container envs add name=route-env key=SSH_KEY value="id_ed25519"
+# опционально: SSH_PORT, SOCKS_PORT, TUN_ADDR, RETRY_DELAY
+
+# Контейнер — ВАЖНО: /dev/net/tun mount НЕ нужен, RouterOS создаёт его сам
+/container add file=route.tar.gz interface=veth-route envlist=route-env mounts=ssh-key logging=yes start-on-boot=yes
+
+# Routing: точка переключения с SSTP (или любого старого шлюза) на наш контейнер
+# Если у тебя уже есть routing-rule для маркированного трафика — поменяй gateway:
+/routing rule set [find routing-mark=YOUR_MARK] gateway=192.168.254.10
+```
+
+### Переменные окружения
+
+| Переменная   | По умолчанию      | Описание                                                       |
+|--------------|-------------------|----------------------------------------------------------------|
+| `SSH_HOSTS`  | —                 | Список серверов через запятую, формат `host[:port]`            |
+| `SSH_HOST`   | —                 | Совместимость с `socks/`. Если задан, а `SSH_HOSTS` нет — используется как единственный сервер |
+| `SSH_USER`   | `root`            | SSH-пользователь (общий для всех серверов)                     |
+| `SSH_PORT`   | `22`              | Дефолтный SSH-порт, если в `SSH_HOSTS` порт не указан          |
+| `SSH_KEY`    | `id_ed25519`      | Имя файла ключа в `/ssh`                                       |
+| `TUN_NAME`   | `tun0`            | Имя TUN-устройства внутри namespace                             |
+| `TUN_ADDR`   | `198.18.0.1/30`   | Адрес на tun0 (CGNAT RFC 6815)                                  |
+| `SOCKS_PORT` | `1080`            | Локальный порт SSH `-D` и upstream для hev-socks5-tunnel        |
+| `RETRY_DELAY`| `5`               | Пауза в секундах после полного перебора серверов                |
+
+### Проверка
+
+```bash
+# С клиента в LAN, попадающего под mangle-маркировку
+curl https://ifconfig.me
+# Должен вернуть IP активного сервера из SSH_HOSTS, не РФ
+
+# Регресс: не-маркированный домен идёт мимо
+curl https://ip-api.com/json
+# Должен вернуть РФ-IP (если домен не в address-list)
+```
+
+Внутри контейнера (`/container shell number=<N>`):
+
+```sh
+ip link show tun0      # state UP
+ip rule show           # содержит '100: from all iif <if> lookup 100'
+ip route show table 100  # default dev tun0
+```
+
+### Фолбэк
+
+Если в `SSH_HOSTS` несколько серверов через запятую — entrypoint крутит их по очереди при падении ssh. Существующие TCP-соединения через активный сервер рвутся при переключении (нечего поделать), новые открываются через следующий доступный.
