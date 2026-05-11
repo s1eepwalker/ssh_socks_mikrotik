@@ -76,5 +76,16 @@ echo "$(date) input interface detected: ${INPUT_IF}"
 ip rule add iif ${INPUT_IF} lookup 100 priority 300
 ip route add default dev ${TUN_NAME:-tun0} table 100
 
+# Включаем IP forwarding (на тесте стояло, но эксплицитно надёжнее)
+echo 1 > /proc/sys/net/ipv4/ip_forward
+
+# Отключаем reverse-path filter: пакет из LAN MikroTik (src=192.168.88.X)
+# приходит на veth-route, ответный путь к этому src через тот же интерфейс не существует
+# (192.168.88.0/24 за MikroTik, в контейнере доступен только default GW).
+# Strict-режим (=1) принимает это за спуфинг и дропает пакеты ДО routing decision.
+echo 0 > /proc/sys/net/ipv4/conf/all/rp_filter
+echo 0 > /proc/sys/net/ipv4/conf/${INPUT_IF}/rp_filter
+echo 0 > /proc/sys/net/ipv4/conf/${TUN_NAME:-tun0}/rp_filter
+
 echo "$(date) policy routing ready, waiting on hev-socks5-tunnel..."
 wait ${HEV_PID}
