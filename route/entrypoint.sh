@@ -79,6 +79,10 @@ ip route add default dev ${TUN_NAME:-tun0} table 100
 # Включаем IP forwarding (на тесте стояло, но эксплицитно надёжнее)
 echo 1 > /proc/sys/net/ipv4/ip_forward
 
+# Снимаем FORWARD DROP, который RouterOS-контейнер ставит по умолчанию в namespace.
+# Без этого kernel вычисляет «route: dev tun0», но FORWARD-chain режет пакет до TX.
+iptables -P FORWARD ACCEPT 2>&1 || echo "$(date) WARN: iptables -P FORWARD ACCEPT failed"
+
 # Отключаем reverse-path filter: пакет из LAN MikroTik (src=192.168.88.X)
 # приходит на veth-route, ответный путь к этому src через тот же интерфейс не существует
 # (192.168.88.0/24 за MikroTik, в контейнере доступен только default GW).
