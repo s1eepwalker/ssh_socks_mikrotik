@@ -68,10 +68,12 @@ done
 echo "$(date) ${TUN_NAME:-tun0} is up"
 
 # Policy routing: forwarded трафик → таблица 100 → tun0
-# Делаем после старта hev, чтобы наш маршрут не вычистился при инициализации устройства
+# Делаем после старта hev, чтобы наш маршрут не вычистился при инициализации устройства.
+# Priority 300 — после local (200), чтобы локальные доставки (SSH-ответы на наш IP)
+# резолвились через local table раньше, чем попадут в наш default dev tun0.
 INPUT_IF=$(ip route show default | awk '/^default/ {print $5; exit}')
 echo "$(date) input interface detected: ${INPUT_IF}"
-ip rule add iif ${INPUT_IF} lookup 100 priority 100
+ip rule add iif ${INPUT_IF} lookup 100 priority 300
 ip route add default dev ${TUN_NAME:-tun0} table 100
 
 echo "$(date) policy routing ready, waiting on hev-socks5-tunnel..."
