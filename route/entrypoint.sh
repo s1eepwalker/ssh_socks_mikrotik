@@ -40,18 +40,7 @@ i=0; while [ $i -lt 30 ]; do i=$((i+1))
   sleep 1
 done
 
-# TUN
-ip tuntap add dev ${TUN_NAME:-tun0} mode tun
-ip addr add ${TUN_ADDR:-198.18.0.1/30} dev ${TUN_NAME:-tun0}
-ip link set ${TUN_NAME:-tun0} up
-
-# Policy routing: forwarded трафик → таблица 100 → tun0
-INPUT_IF=$(ip route show default | awk '/^default/ {print $5; exit}')
-echo "$(date) input interface detected: ${INPUT_IF}"
-ip rule add iif ${INPUT_IF} lookup 100 priority 100
-ip route add default dev ${TUN_NAME:-tun0} table 100
-
-# Конфиг hev-socks5-tunnel
+# Конфиг hev-socks5-tunnel — он сам создаёт и поднимает tun-устройство
 TUN_IP=${TUN_ADDR:-198.18.0.1/30}
 TUN_IP=${TUN_IP%/*}
 cat > /tmp/hev.yaml <<EOF
@@ -68,4 +57,22 @@ misc:
 EOF
 
 echo "$(date) Starting hev-socks5-tunnel..."
-exec hev-socks5-tunnel /tmp/hev.yaml
+hev-socks5-tunnel /tmp/hev.yaml &
+HEV_PID=$!
+
+# Ждём, пока hev поднимет tun-устройство
+i=0; while [ $i -lt 30 ]; do i=$((i+1))
+  ip link show ${TUN_NAME:-tun0} 2>/dev/null | grep -q "state UP\|UNKNOWN" && break
+  sleep 1
+done
+echo "$(date) ${TUN_NAME:-tun0} is up"
+
+# Policy routing: forwarded трафик → таблица 100 → tun0
+# Делаем после старта hev, чтобы наш маршрут не вычистился при инициализации устройства
+INPUT_IF=$(ip route show default | awk '/^default/ {print $5; exit}')
+echo "$(date) input interface detected: ${INPUT_IF}"
+ip rule add iif ${INPUT_IF} lookup 100 priority 100
+ip route add default dev ${TUN_NAME:-tun0} table 100
+
+echo "$(date) policy routing ready, waiting on hev-socks5-tunnel..."
+wait ${HEV_PID}
