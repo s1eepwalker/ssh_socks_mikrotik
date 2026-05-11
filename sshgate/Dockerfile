@@ -1,12 +1,12 @@
 FROM alpine:3.20 AS build
-RUN apk add --no-cache build-base git linux-headers openssl-dev openssh-client iproute2-minimal
+RUN apk add --no-cache build-base git linux-headers openssh-client iproute2-minimal
 
 # hev-socks5-tunnel
 RUN git clone --recursive --depth 1 https://github.com/heiher/hev-socks5-tunnel.git /hev && \
     cd /hev && make && strip bin/hev-socks5-tunnel
 
-# 3proxy
-RUN git clone --depth 1 https://github.com/3proxy/3proxy.git /3proxy && \
+# 3proxy — pin к stable 0.9.5 (главная ветка main падает на CONNECT из-за регрессии)
+RUN git clone --depth 1 --branch 0.9.5 https://github.com/3proxy/3proxy.git /3proxy && \
     cd /3proxy && make -f Makefile.Linux && strip bin/3proxy
 
 # Сборка списка нужных файлов + ldd-зависимости
