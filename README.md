@@ -29,24 +29,87 @@
 
 ### Подготовка SSH-ключа
 
+#### 1. Сгенерировать пару ключей (на твоей машине)
+
 ```bash
 ssh-keygen -t ed25519 -f id_ed25519 -N ""
 ```
 
-Публичный ключ (`id_ed25519.pub`) добавить в `~/.ssh/authorized_keys` на удалённом сервере.
-Приватный ключ (`id_ed25519`) загрузить на MikroTik в `/ssh/id_ed25519`.
+#### 2. Публичный — на удалённый сервер
+
+`id_ed25519.pub` добавить в `~/.ssh/authorized_keys` пользователя, чьё имя пойдёт в env `SSH_USER` контейнера.
+
+Проверь с PC, что приватный ключ принят:
+```bash
+ssh -i id_ed25519 user@your-server.com "echo ok"
+```
+
+#### 3. Создать mount на MikroTik (один раз, общий для всех контейнеров)
+
+```routeros
+/container mounts add name=ssh-key src=/ssh dst=/ssh
+```
+
+Это создаст «приватную» директорию `/ssh/` в файловой системе RouterOS, которую будут монтировать контейнеры.
+
+#### 4. Загрузить приватный ключ в /ssh/
+
+Несколько способов, выбери удобный:
+
+- **WinBox Files (drag-n-drop):**
+  - Открой панель **Files** в WinBox
+  - Перетащи `id_ed25519` в строку с папкой `ssh` (тип `container-store`)
+  - Подсказка: проще, **пока ни один контейнер с `mounts=ssh-key` ещё не запущен** — иначе папка станет «невидимой» (см. подводный камень ниже)
+
+- **SCP** с PC (если включён SSH-сервис на роутере, по умолчанию):
+  ```bash
+  scp -O id_ed25519 admin@<router-ip>:/ssh/
+  # -O форсит legacy SCP-протокол, RouterOS-сервер ждёт именно его
+  ```
+
+- **`/tool fetch`** через временный HTTP-сервер:
+  ```bash
+  # На PC, в директории с ключом
+  python -m http.server 8080
+  # или: npx http-server -p 8080
+  ```
+  ```routeros
+  /tool fetch url="http://<your-pc-ip>:8080/id_ed25519" dst-path=/ssh/id_ed25519
+  ```
+
+- **FTP** (если `/ip service print` показывает ftp enabled):
+  ```bash
+  ftp <router-ip>
+  ftp> binary
+  ftp> cd ssh
+  ftp> put id_ed25519
+  ```
+
+#### 5. ⚠️ Подводный камень: файл «исчезает» из Files после запуска контейнера
+
+После того как любой контейнер с `mounts=ssh-key` стартанул хотя бы раз, RouterOS помечает `/ssh/` как «приватную для контейнеров» — её содержимое **больше не отображается** в `/file print` и WinBox Files. Файл не пропал, контейнеры его читают, но из админ-панели его теперь не видно.
+
+**Подтвердить, что ключ на месте** — через shell любого работающего контейнера с этим mount:
+
+```routeros
+/container shell number=<N>
+```
+```sh
+ls -la /ssh/
+cat /ssh/id_ed25519 | head -1
+# Должен показать "-----BEGIN OPENSSH PRIVATE KEY-----"
+```
+
+**Заменить ключ позже:**
+1. Остановить все контейнеры, использующие mount: `/container stop number=...`
+2. После остановки `/ssh/` снова станет видимой в Files — залить новый файл
+3. Запустить контейнеры
 
 ### Создать bridge для контейнеров (если ещё нет)
 
 ```routeros
 /interface bridge add name=Bridge-Docker
 /ip address add address=192.168.254.1/24 interface=Bridge-Docker
-```
-
-### Монтирование SSH-ключа
-
-```routeros
-/container mounts add name=ssh-key src=/ssh dst=/ssh
 ```
 
 ### Сборка и конвертация образа
