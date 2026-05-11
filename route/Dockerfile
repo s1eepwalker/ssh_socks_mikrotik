@@ -1,5 +1,5 @@
 FROM alpine:3.20 AS build-hev
-RUN apk add --no-cache build-base git
+RUN apk add --no-cache build-base git linux-headers
 RUN git clone --recursive --depth 1 https://github.com/heiher/hev-socks5-tunnel.git /hev && \
     cd /hev && make && strip bin/hev-socks5-tunnel
 
