@@ -301,9 +301,9 @@ L3-gateway для MikroTik. Маркированный по `dst-address-list` T
 /interface bridge port add bridge=Bridge-Docker interface=veth-route
 
 # Переменные окружения
-/container envs add name=route-env key=SSH_HOSTS value="ams.example.com:2222,bishkek.example.com"
-/container envs add name=route-env key=SSH_USER value="user1"
-/container envs add name=route-env key=SSH_KEY value="id_ed25519"
+/container envs add list=route-env key=SSH_HOSTS value="ams.example.com:2222,bishkek.example.com"
+/container envs add list=route-env key=SSH_USER value="user1"
+/container envs add list=route-env key=SSH_KEY value="id_ed25519"
 # опционально: SSH_PORT, SOCKS_PORT, TUN_ADDR, RETRY_DELAY
 
 # Контейнер — ВАЖНО: /dev/net/tun mount НЕ нужен, RouterOS создаёт его сам
@@ -413,9 +413,9 @@ Run on RouterOS terminal (replace placeholder values with real ones):
 /interface veth add name=veth-route address=192.168.254.10/24 gateway=192.168.254.1
 /interface bridge port add bridge=Bridge-Docker interface=veth-route
 
-/container envs add name=route-env key=SSH_HOSTS value="<real-host-1>:<port>,<real-host-2>"
-/container envs add name=route-env key=SSH_USER value="<real-user>"
-/container envs add name=route-env key=SSH_KEY value="id_rsa-VSCODE"
+/container envs add list=route-env key=SSH_HOSTS value="<real-host-1>:<port>,<real-host-2>"
+/container envs add list=route-env key=SSH_USER value="<real-user>"
+/container envs add list=route-env key=SSH_KEY value="id_rsa-VSCODE"
 
 /container add file=route.tar.gz interface=veth-route envlist=route-env mounts=ssh-key logging=yes start-on-boot=no
 /container print
@@ -479,8 +479,8 @@ Temporarily make the first SSH host unreachable (e.g., block via firewall on the
 
 ```routeros
 /container stop number=<N>
-/container envs remove [find name=route-env key=SSH_HOSTS]
-/container envs add name=route-env key=SSH_HOSTS value="bad.example.com:22,<real-host-2>"
+/container envs remove [find list=route-env key=SSH_HOSTS]
+/container envs add list=route-env key=SSH_HOSTS value="bad.example.com:22,<real-host-2>"
 /container start number=<N>
 ```
 
@@ -495,8 +495,8 @@ Restore `SSH_HOSTS` after the test:
 
 ```routeros
 /container stop number=<N>
-/container envs remove [find name=route-env key=SSH_HOSTS]
-/container envs add name=route-env key=SSH_HOSTS value="<real-host-1>:<port>,<real-host-2>"
+/container envs remove [find list=route-env key=SSH_HOSTS]
+/container envs add list=route-env key=SSH_HOSTS value="<real-host-1>:<port>,<real-host-2>"
 /container start number=<N>
 ```
 

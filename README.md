@@ -204,15 +204,15 @@ WinBox Files / SFTP / `scp`.
 /interface bridge port add bridge=Bridge-Docker interface=veth-sshgate
 
 # Минимум для L3-роли
-/container envs add name=sshgate-env key=SSH_HOSTS value="ams.example.com:2222,bishkek.example.com"
-/container envs add name=sshgate-env key=SSH_USER  value="user1"
-/container envs add name=sshgate-env key=SSH_KEY   value="id_ed25519"
+/container envs add list=sshgate-env key=SSH_HOSTS value="ams.example.com:2222,bishkek.example.com"
+/container envs add list=sshgate-env key=SSH_USER  value="user1"
+/container envs add list=sshgate-env key=SSH_KEY   value="id_ed25519"
 
 # Опционально — включить SOCKS5/HTTP листенер
-# /container envs add name=sshgate-env key=SOCKS_PORT value="1080"
-# /container envs add name=sshgate-env key=SOCKS_USER value="myuser"   # включит auth
-# /container envs add name=sshgate-env key=SOCKS_PASS value="mypassword"
-# /container envs add name=sshgate-env key=HTTP_PORT  value="3128"      # требует SOCKS_PORT
+# /container envs add list=sshgate-env key=SOCKS_PORT value="1080"
+# /container envs add list=sshgate-env key=SOCKS_USER value="myuser"   # включит auth
+# /container envs add list=sshgate-env key=SOCKS_PASS value="mypassword"
+# /container envs add list=sshgate-env key=HTTP_PORT  value="3128"      # требует SOCKS_PORT
 ```
 
 #### 5. Контейнер
@@ -351,16 +351,16 @@ SOCKS5- и HTTP-прокси через SSH-туннель. Три режима 
 /interface bridge port add bridge=Bridge-Docker interface=veth-socks
 
 # Переменные окружения
-/container envs add name=socks-env key=SSH_HOST value="1.2.3.4"
-/container envs add name=socks-env key=SSH_USER value="user1"
-/container envs add name=socks-env key=SSH_PORT value="22"
-/container envs add name=socks-env key=SOCKS_PORT value="1080"
-/container envs add name=socks-env key=SSH_KEY value="id_ed25519"
+/container envs add list=socks-env key=SSH_HOST value="1.2.3.4"
+/container envs add list=socks-env key=SSH_USER value="user1"
+/container envs add list=socks-env key=SSH_PORT value="22"
+/container envs add list=socks-env key=SOCKS_PORT value="1080"
+/container envs add list=socks-env key=SSH_KEY value="id_ed25519"
 # Опционально — включить авторизацию (SOCKS):
-# /container envs add name=socks-env key=SOCKS_USER value="myuser"
-# /container envs add name=socks-env key=SOCKS_PASS value="mypassword"
+# /container envs add list=socks-env key=SOCKS_USER value="myuser"
+# /container envs add list=socks-env key=SOCKS_PASS value="mypassword"
 # Опционально — включить HTTP-прокси (требует SOCKS_USER/SOCKS_PASS):
-# /container envs add name=socks-env key=HTTP_PORT value="3128"
+# /container envs add list=socks-env key=HTTP_PORT value="3128"
 
 # Контейнер
 /container add file=socks-tunnel.tar.gz interface=veth-socks envlist=socks-env mounts=ssh-key start-on-boot=yes
@@ -418,14 +418,14 @@ MTProto Proxy с маскировкой под TLS для обхода DPI. Тр
 /interface bridge port add bridge=Bridge-Docker interface=veth-mtg
 
 # Переменные окружения
-/container envs add name=mtg-env key=SSH_HOST value="1.2.3.4"
-/container envs add name=mtg-env key=SSH_USER value="user1"
-/container envs add name=mtg-env key=SSH_PORT value="22"
-/container envs add name=mtg-env key=SSH_KEY value="id_ed25519"
-/container envs add name=mtg-env key=MTG_PORT value="443"
-/container envs add name=mtg-env key=MTG_DOMAIN value="google.com"
+/container envs add list=mtg-env key=SSH_HOST value="1.2.3.4"
+/container envs add list=mtg-env key=SSH_USER value="user1"
+/container envs add list=mtg-env key=SSH_PORT value="22"
+/container envs add list=mtg-env key=SSH_KEY value="id_ed25519"
+/container envs add list=mtg-env key=MTG_PORT value="443"
+/container envs add list=mtg-env key=MTG_DOMAIN value="google.com"
 # Опционально — зафиксировать секрет (иначе генерируется при каждом запуске):
-# /container envs add name=mtg-env key=MTG_SECRET value="секрет_из_лога"
+# /container envs add list=mtg-env key=MTG_SECRET value="секрет_из_лога"
 
 # Контейнер
 /container add file=mtg-proxy.tar.gz interface=veth-mtg envlist=mtg-env mounts=ssh-key start-on-boot=yes
@@ -547,11 +547,11 @@ scp route.tar.gz admin@<router-ip>:/
 /interface bridge port add bridge=Bridge-Docker interface=veth-route
 
 # Env-переменные
-/container envs add name=route-env key=SSH_HOSTS value="ams.example.com:2222,bishkek.example.com"
-/container envs add name=route-env key=SSH_USER  value="user1"
-/container envs add name=route-env key=SSH_KEY   value="id_ed25519"
+/container envs add list=route-env key=SSH_HOSTS value="ams.example.com:2222,bishkek.example.com"
+/container envs add list=route-env key=SSH_USER  value="user1"
+/container envs add list=route-env key=SSH_KEY   value="id_ed25519"
 # опционально: SSH_PORT (если все хосты на одном нестандартном порту и не указывается в SSH_HOSTS)
-# /container envs add name=route-env key=SSH_PORT value="22"
+# /container envs add list=route-env key=SSH_PORT value="22"
 ```
 
 Формат `SSH_HOSTS`:
@@ -690,8 +690,8 @@ curl https://ip-api.com/json
 
 ```routeros
 /container stop number=<N>
-/container envs remove [find name=route-env key=SSH_HOSTS]
-/container envs add name=route-env key=SSH_HOSTS value="bad.example.com:22,<реальный-сервер-2>"
+/container envs remove [find list=route-env key=SSH_HOSTS]
+/container envs add list=route-env key=SSH_HOSTS value="bad.example.com:22,<реальный-сервер-2>"
 /container start number=<N>
 ```
 
@@ -706,8 +706,8 @@ SSH: trying <реальный-сервер-2>...
 
 ```routeros
 /container stop number=<N>
-/container envs remove [find name=route-env key=SSH_HOSTS]
-/container envs add name=route-env key=SSH_HOSTS value="<реальные-серверы>"
+/container envs remove [find list=route-env key=SSH_HOSTS]
+/container envs add list=route-env key=SSH_HOSTS value="<реальные-серверы>"
 /container start number=<N>
 ```
 

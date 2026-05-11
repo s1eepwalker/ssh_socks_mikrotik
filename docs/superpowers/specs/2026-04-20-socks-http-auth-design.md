@@ -97,7 +97,7 @@ fi
 1. Заголовочное описание режимов — «Три режима: без auth (чистый `ssh -D`, совместим с Telegram), SOCKS с auth (3proxy), SOCKS+HTTP с auth (3proxy)».
 2. В блок RouterOS добавить закомментированный пример:
    ```
-   # /container envs add name=socks-env key=HTTP_PORT value="3128"
+   # /container envs add list=socks-env key=HTTP_PORT value="3128"
    ```
 3. В блок DST-NAT добавить закомментированные правила для HTTP-порта (локальная сеть + внешний доступ), симметрично существующим правилам для `1080`.
 4. В таблицу env добавить строку `HTTP_PORT`.

@@ -127,18 +127,18 @@ SOCKS5- и HTTP-прокси через SSH-туннель. Три режима 
 
 ```routeros
 # Опционально — включить авторизацию:
-# /container envs add name=socks-env key=SOCKS_USER value="myuser"
-# /container envs add name=socks-env key=SOCKS_PASS value="mypassword"
+# /container envs add list=socks-env key=SOCKS_USER value="myuser"
+# /container envs add list=socks-env key=SOCKS_PASS value="mypassword"
 ```
 
 Заменить на:
 
 ```routeros
 # Опционально — включить авторизацию (SOCKS):
-# /container envs add name=socks-env key=SOCKS_USER value="myuser"
-# /container envs add name=socks-env key=SOCKS_PASS value="mypassword"
+# /container envs add list=socks-env key=SOCKS_USER value="myuser"
+# /container envs add list=socks-env key=SOCKS_PASS value="mypassword"
 # Опционально — включить HTTP-прокси (требует SOCKS_USER/SOCKS_PASS):
-# /container envs add name=socks-env key=HTTP_PORT value="3128"
+# /container envs add list=socks-env key=HTTP_PORT value="3128"
 ```
 
 - [ ] **Step 2.3: Добавить DST-NAT правила для HTTP в блок RouterOS**

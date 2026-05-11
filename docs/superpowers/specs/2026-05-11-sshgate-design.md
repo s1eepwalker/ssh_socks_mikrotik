@@ -253,15 +253,15 @@ exit 1
 /interface bridge port add bridge=Bridge-Docker interface=veth-sshgate
 
 # 3. Env-переменные — минимум для L3-роли
-/container envs add name=sshgate-env key=SSH_HOSTS value="ams.example.com:2222,bishkek.example.com"
-/container envs add name=sshgate-env key=SSH_USER  value="user1"
-/container envs add name=sshgate-env key=SSH_KEY   value="id_ed25519"
+/container envs add list=sshgate-env key=SSH_HOSTS value="ams.example.com:2222,bishkek.example.com"
+/container envs add list=sshgate-env key=SSH_USER  value="user1"
+/container envs add list=sshgate-env key=SSH_KEY   value="id_ed25519"
 
 # 4. Env — добавить листенер (опционально)
-# /container envs add name=sshgate-env key=SOCKS_PORT value="1080"
-# /container envs add name=sshgate-env key=SOCKS_USER value="myuser"   # опц., с auth
-# /container envs add name=sshgate-env key=SOCKS_PASS value="mypass"
-# /container envs add name=sshgate-env key=HTTP_PORT  value="3128"     # требует SOCKS_PORT
+# /container envs add list=sshgate-env key=SOCKS_PORT value="1080"
+# /container envs add list=sshgate-env key=SOCKS_USER value="myuser"   # опц., с auth
+# /container envs add list=sshgate-env key=SOCKS_PASS value="mypass"
+# /container envs add list=sshgate-env key=HTTP_PORT  value="3128"     # требует SOCKS_PORT
 
 # 5. Контейнер — БЕЗ /dev/net/tun mount, RouterOS создаёт сам
 /container add file=sshgate.tar.gz interface=veth-sshgate envlist=sshgate-env mounts=ssh-key logging=yes start-on-boot=yes

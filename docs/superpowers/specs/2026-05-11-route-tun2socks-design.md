@@ -191,9 +191,9 @@ exec hev-socks5-tunnel /tmp/hev.yaml
 /interface bridge port add bridge=Bridge-Docker interface=veth-route
 
 # 3. Env-переменные
-/container envs add name=route-env key=SSH_HOSTS value="ams.example.com:2222,bishkek.example.com"
-/container envs add name=route-env key=SSH_USER value="user1"
-/container envs add name=route-env key=SSH_KEY value="id_rsa-VSCODE"
+/container envs add list=route-env key=SSH_HOSTS value="ams.example.com:2222,bishkek.example.com"
+/container envs add list=route-env key=SSH_USER value="user1"
+/container envs add list=route-env key=SSH_KEY value="id_rsa-VSCODE"
 # опционально: SSH_PORT (дефолт 22), SOCKS_PORT (дефолт 1080), TUN_ADDR, RETRY_DELAY
 
 # 4. Контейнер — БЕЗ /dev/net/tun mount
