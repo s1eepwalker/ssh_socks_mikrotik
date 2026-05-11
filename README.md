@@ -6,9 +6,10 @@
 
 | Контейнер | Описание | Размер |
 |-----------|----------|--------|
-| [socks/](socks/) | SOCKS5-прокси (SSH -D), опционально с авторизацией через 3proxy | ~3.5 МБ |
+| [sshgate/](sshgate/) | Объединённый: L3-gateway + опциональный SOCKS5/HTTP-листенер, общий SSH-туннель с фолбэком | ~4.5 МБ |
 | [mtg/](mtg/) | MTProto Proxy для Telegram, маскировка под TLS для обхода DPI | ~8 МБ |
-| [route/](route/) | Прозрачный L3-gateway: маркированный TCP MikroTik → SOCKS5 → SSH-туннель с фолбэком | ~4 МБ |
+| [socks/](socks/) | **Deprecated** — заменён `sshgate/`. SOCKS5-прокси (SSH -D), опционально с авторизацией через 3proxy | ~3.5 МБ |
+| [route/](route/) | **Deprecated** — заменён `sshgate/`. Прозрачный L3-gateway: маркированный TCP MikroTik → SOCKS5 → SSH-туннель с фолбэком | ~4 МБ |
 
 ---
 
@@ -75,7 +76,198 @@ docker volume rm imgvol
 
 ---
 
+## sshgate/ — SSH-туннель: L3-роутинг + SOCKS5/HTTP-прокси
+
+Один контейнер, объединяющий роли `socks/` (application-level SOCKS5/HTTP) и `route/` (transparent L3-gateway). Общий SSH-туннель с фолбэком обслуживает обе роли.
+
+### Что внутри
+
+```
+LAN-клиент (mangle mark)──veth──┐
+                                ├──→ hev-socks5-tunnel (всегда)
+                                │       ↓
+External SOCKS5/HTTP client  ───┤    127.0.0.1:10800 ← ssh -N -D
+                                │       ↑
+                                └──→ 3proxy (если SOCKS_PORT)
+                                        ↑
+                                  Любой LAN/WAN клиент
+```
+
+- **L3-роль активна всегда** — `hev-socks5-tunnel` слушает `tun0`, kernel форвардит туда маркированный трафик от MikroTik. Без mangle-rule на роутере просто idle.
+- **App-listener — opt-in через `SOCKS_PORT`** — `3proxy` слушает на нём (`auth none` или с креденшелами). Опционально HTTP через `HTTP_PORT`.
+- Обе роли используют один `ssh -N -D 127.0.0.1:$SOCKS_BACKEND_PORT` как SOCKS5-upstream.
+- **TCP-only.** SSH `-D` UDP не поддерживает.
+
+### Полная установка
+
+#### 1. Подготовка (общие шаги)
+
+Сделай один раз, если ещё нет: [архитектура роутера](#архитектура-роутера), [SSH-ключ](#подготовка-ssh-ключа), [Bridge для контейнеров](#создать-bridge-для-контейнеров-если-ещё-нет), [Mount для ключа](#монтирование-ssh-ключа).
+
+#### 2. Сборка образа
+
+```bash
+cd sshgate
+docker buildx build --platform linux/arm64 --provenance=false --sbom=false -t sshgate:latest --load .
+
+docker volume create imgvol
+docker run --rm -v imgvol:/out -v /var/run/docker.sock:/var/run/docker.sock \
+  quay.io/skopeo/stable:latest copy \
+  docker-daemon:sshgate:latest \
+  docker-archive:/out/image.tar:sshgate:latest
+
+docker run --rm -v imgvol:/data -v "$(pwd):/host" --entrypoint "" \
+  quay.io/skopeo/stable:latest \
+  sh -c "cat /data/image.tar | gzip > /host/sshgate.tar.gz"
+
+docker volume rm imgvol
+```
+
+На Windows есть `sshgate\build.ps1`.
+
+#### 3. Залить на роутер
+
+WinBox Files / SFTP / `scp`.
+
+#### 4. veth и env
+
+```routeros
+/interface veth add name=veth-sshgate address=192.168.254.11/24 gateway=192.168.254.1
+/interface bridge port add bridge=Bridge-Docker interface=veth-sshgate
+
+# Минимум для L3-роли
+/container envs add name=sshgate-env key=SSH_HOSTS value="ams.example.com:2222,bishkek.example.com"
+/container envs add name=sshgate-env key=SSH_USER  value="user1"
+/container envs add name=sshgate-env key=SSH_KEY   value="id_ed25519"
+
+# Опционально — включить SOCKS5/HTTP листенер
+# /container envs add name=sshgate-env key=SOCKS_PORT value="1080"
+# /container envs add name=sshgate-env key=SOCKS_USER value="myuser"   # включит auth
+# /container envs add name=sshgate-env key=SOCKS_PASS value="mypassword"
+# /container envs add name=sshgate-env key=HTTP_PORT  value="3128"      # требует SOCKS_PORT
+```
+
+#### 5. Контейнер
+
+```routeros
+/container add file=sshgate.tar.gz interface=veth-sshgate envlist=sshgate-env mounts=ssh-key logging=yes start-on-boot=yes
+/container print
+/container start number=<N>
+```
+
+Важно: **никакого `mounts=tun-dev`** — RouterOS сам кладёт `/dev/net/tun` в namespace.
+
+#### 6. L3-роль: routing-rule на gateway контейнера
+
+```routeros
+# КРИТИЧНО — формат gateway: IP%Bridge-Docker
+/ip route add dst-address=0.0.0.0/0 gateway=192.168.254.11%Bridge-Docker routing-table=<твоя-таблица>
+```
+
+⚠️ Использовать `gateway=192.168.254.11%Bridge-Docker`, не имя интерфейса (`veth-sshgate`) и не голый IP без scope. См. Troubleshooting ниже.
+
+#### 7. App-listener: dst-nat (опционально)
+
+```routeros
+# Доступ из LAN
+/ip firewall nat add chain=dstnat dst-port=1080 protocol=tcp src-address=192.168.88.0/24 action=dst-nat to-addresses=192.168.254.11 to-ports=1080
+
+# Доступ из интернета (если хочешь)
+/ip firewall nat add chain=dstnat dst-port=1080 protocol=tcp in-interface=ether1 action=dst-nat to-addresses=192.168.254.11 to-ports=1080
+
+# Если задан HTTP_PORT, симметрично для 3128
+```
+
+#### 8. Проверка
+
+В логе (`/log print where topics~"container"`) ожидаем:
+```
+SSH: trying ...
+Warning: Permanently added ...
+Starting hev-socks5-tunnel...
+tun0 is up
+input interface detected: veth-sshgate
+3proxy listening: SOCKS=1080, auth=none   (если SOCKS_PORT задан)
+sshgate ready (route=on, listener=1080)
+```
+
+С LAN-клиента под mangle-маркировкой:
+```bash
+curl https://ifconfig.me               # → IP активного SSH-сервера, не РФ
+```
+
+С любого клиента через listener (если включён):
+```bash
+curl -x socks5://<router-ip>:1080 https://ifconfig.me
+# или с auth:
+curl -x socks5://u:p@<router-ip>:1080 https://ifconfig.me
+# HTTP:
+curl -x http://u:p@<router-ip>:3128 https://ifconfig.me
+```
+
+### Переменные окружения
+
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| **SSH-туннель** | | |
+| `SSH_HOSTS` | — (обязательная) | Список серверов через запятую, формат `host[:port]`. Пример: `ams.example.com:2222,bishkek.example.com` |
+| `SSH_HOST` | — | Совместимость с `socks/`. Если задан, а `SSH_HOSTS` нет — используется как единственный сервер |
+| `SSH_USER` | `root` | SSH-пользователь (один для всех серверов) |
+| `SSH_PORT` | `22` | Дефолтный порт, если в `SSH_HOSTS` явно не указан |
+| `SSH_KEY` | `id_ed25519` | Имя файла ключа в `/ssh` |
+| `RETRY_DELAY` | `5` | Пауза в секундах после полного перебора серверов |
+| `SOCKS_BACKEND_PORT` | `10800` | Локальный 127.0.0.1 порт SSH `-D` (внутренний) |
+| **L3-роль (всегда активна)** | | |
+| `TUN_NAME` | `tun0` | Имя TUN-устройства внутри namespace |
+| `TUN_ADDR` | `198.18.0.1/30` | Адрес на tun0 (CGNAT RFC 6815) |
+| **App-listener (opt-in)** | | |
+| `SOCKS_PORT` | — | Внешний порт SOCKS5. Если задан → 3proxy слушает. Без — листенер не запускается. |
+| `HTTP_PORT` | — | Внешний порт HTTP. Требует `SOCKS_PORT`. |
+| `SOCKS_USER` | — | Логин для auth. Без — `auth none` (Telegram-совместимо). |
+| `SOCKS_PASS` | — | Пароль (требует `SOCKS_USER`). |
+
+### Миграция со старых контейнеров
+
+| С чего | Что менять |
+|---|---|
+| `socks/` без auth | `SSH_HOST` → `SSH_HOSTS` (одно значение OK). `SOCKS_PORT` оставить — получишь 3proxy без auth. |
+| `socks/` с auth | `SSH_HOST` → `SSH_HOSTS`. Остальное (`SOCKS_USER`, `SOCKS_PASS`, опц. `HTTP_PORT`) без изменений. |
+| `route/` (только L3) | **Убрать `SOCKS_PORT` env.** В sshgate `SOCKS_PORT` означает внешний листенер. Внутренний порт переименован в `SOCKS_BACKEND_PORT` (дефолт `10800`). |
+
+### Troubleshooting sshgate/
+
+**Контейнер перезапускается в цикле (`*** start` → `Killed`):**
+- Полный лог от `*** start` до `Killed` покажет, где упало
+- `SSH_HOSTS (or SSH_HOST) required` — не задана обязательная env
+- `HTTP_PORT requires SOCKS_PORT` — задан HTTP_PORT без SOCKS_PORT
+- `SOCKS_PASS requires SOCKS_USER` — задан пароль без логина
+
+**`curl` через L3-роль таймаутит, в логе всё «sshgate ready»:**
+- Внутри контейнера (`/container shell number=<N>`):
+  ```sh
+  grep -A1 '^Ip:' /proc/net/snmp | head -2
+  ```
+  Колонка `ForwDatagrams` остаётся 0 после curl — kernel не форвардит. На 99% — **gateway в `/ip route` указан неправильно**:
+  - ✅ `gateway=192.168.254.11%Bridge-Docker`
+  - ❌ `gateway=veth-sshgate` (имя интерфейса)
+  - ❌ `gateway=192.168.254.11` (без scope — ARP-резолюция нестабильна через bridge)
+
+  Фикс: `/ip route set [find routing-table=<твоя-таблица>] gateway=192.168.254.11%Bridge-Docker`
+
+**`curl -x socks5://...` через listener не работает:**
+- Проверь dst-nat правило (см. шаг 7)
+- В контейнере: `busybox netstat -lnt` должен показывать `0.0.0.0:1080` (порт SOCKS_PORT) и `127.0.0.1:10800` (backend)
+- Если SOCKS_USER задан — без пароля будет `407` или connection refused, это нормально
+
+**Какой SSH-сервер сейчас активен:**
+- В логе ищи последнюю строку `SSH: trying ...` без ошибки после неё
+- Или внутри: `busybox netstat -ant | grep ESTABLISHED` → колонка Foreign Address
+
+---
+
 ## socks/ — SOCKS5 Proxy
+
+> **⚠️ DEPRECATED.** Этот контейнер заменён `sshgate/` (см. соответствующую секцию выше), который объединяет роли `socks/` и `route/` в одном образе с общим SSH-туннелем. Для новых деплоев используй `sshgate/`. Старый `socks/` оставлен для обратной совместимости.
 
 SOCKS5- и HTTP-прокси через SSH-туннель. Три режима работы:
 
@@ -199,6 +391,8 @@ https://t.me/proxy?server=ВАШ_ПУБЛИЧНЫЙ_IP&port=443&secret=СЕКР�
 ---
 
 ## route/ — Прозрачный L3-роутинг через SSH-туннель
+
+> **⚠️ DEPRECATED.** Этот контейнер заменён `sshgate/` (см. соответствующую секцию выше), который добавляет к нему ещё и опциональный SOCKS5/HTTP-листенер на том же SSH-туннеле. Для новых деплоев используй `sshgate/`. Старый `route/` оставлен для обратной совместимости.
 
 Контейнер работает как **прозрачный L3-gateway** для MikroTik. Список доменов в `dst-address-list` → mangle маркирует трафик → routing-rule отправляет на gateway этого контейнера → внутри SOCKS5 поверх SSH-туннеля на удалённый сервер.
 
