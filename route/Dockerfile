@@ -4,16 +4,16 @@ RUN git clone --recursive --depth 1 https://github.com/heiher/hev-socks5-tunnel.
     cd /hev && make && strip bin/hev-socks5-tunnel
 
 FROM alpine:3.20 AS build
-RUN apk add --no-cache openssh-client iproute2-minimal iptables-legacy
+RUN apk add --no-cache openssh-client iproute2-minimal iptables
 RUN mkdir /out && \
     cp /usr/bin/ssh /out/ && \
     cp /bin/busybox /out/ && \
     cp /sbin/ip /out/ && \
-    cp /sbin/xtables-legacy-multi /out/iptables && \
+    cp /sbin/xtables-nft-multi /out/iptables && \
     ldd /usr/bin/ssh | awk '/=>/{print $3}' | xargs -I{} cp {} /out/ && \
     ldd /bin/busybox | awk '/=>/{print $3}' | xargs -I{} cp -n {} /out/ && \
     ldd /sbin/ip | awk '/=>/{print $3}' | xargs -I{} cp -n {} /out/ && \
-    ldd /sbin/xtables-legacy-multi | awk '/=>/{print $3}' | xargs -I{} cp -n {} /out/ && \
+    ldd /sbin/xtables-nft-multi | awk '/=>/{print $3}' | xargs -I{} cp -n {} /out/ && \
     cp /lib/ld-musl-*.so.1 /out/
 
 FROM scratch
