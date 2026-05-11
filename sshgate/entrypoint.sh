@@ -1,6 +1,11 @@
 #!/bin/sh
 set -e
 
+# DNS для 3proxy: нужен для резолва hostnames из CONNECT/SOCKS5-запросов
+# (hev получает чистые IP-пакеты, ему DNS не нужен)
+echo "nameserver 1.1.1.1" > /etc/resolv.conf
+echo "nameserver 8.8.8.8" >> /etc/resolv.conf
+
 # === 1. Валидация env ===
 chmod 600 /ssh/${SSH_KEY:-id_ed25519}
 
