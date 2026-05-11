@@ -83,9 +83,14 @@ echo 1 > /proc/sys/net/ipv4/ip_forward
 # приходит на veth-route, ответный путь к этому src через тот же интерфейс не существует
 # (192.168.88.0/24 за MikroTik, в контейнере доступен только default GW).
 # Strict-режим (=1) принимает это за спуфинг и дропает пакеты ДО routing decision.
+# Per-interface dirs могут отсутствовать в namespace RouterOS — обходим что есть.
 echo 0 > /proc/sys/net/ipv4/conf/all/rp_filter
-echo 0 > /proc/sys/net/ipv4/conf/${INPUT_IF}/rp_filter
-echo 0 > /proc/sys/net/ipv4/conf/${TUN_NAME:-tun0}/rp_filter
+[ -w /proc/sys/net/ipv4/conf/default/rp_filter ] && echo 0 > /proc/sys/net/ipv4/conf/default/rp_filter
+for d in /proc/sys/net/ipv4/conf/*/; do
+  if [ -w "${d}rp_filter" ]; then
+    echo 0 > "${d}rp_filter"
+  fi
+done
 
 echo "$(date) policy routing ready, waiting on hev-socks5-tunnel..."
 wait ${HEV_PID}
