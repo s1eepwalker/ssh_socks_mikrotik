@@ -18,6 +18,27 @@ HOSTS=${SSH_HOSTS:-${SSH_HOST}}
 
 BACKEND_PORT=${SOCKS_BACKEND_PORT:-10800}
 
+# Опциональный промежуточный хост (ProxyJump) — общий для всех SSH_HOSTS.
+# host-key и ключ прыжка задаём в конфиге: дочерний ssh прыжка НЕ наследует
+# -o опции из командной строки внешнего ssh, поэтому StrictHostKeyChecking
+# здесь, а не флагом. IdentitiesOnly — чтобы прыжку не подсунулся ключ таргета.
+JUMP_ARGS=
+if [ -n "$JUMP_HOST" ]; then
+  chmod 600 /ssh/${JUMP_KEY:-${SSH_KEY:-id_ed25519}}
+  cat > /tmp/jump.cfg <<EOF
+Host jump
+    HostName ${JUMP_HOST}
+    Port ${JUMP_PORT:-22}
+    User ${JUMP_USER:-root}
+    IdentityFile /ssh/${JUMP_KEY:-${SSH_KEY:-id_ed25519}}
+    IdentitiesOnly yes
+    StrictHostKeyChecking accept-new
+    ServerAliveInterval 15
+    ServerAliveCountMax 3
+EOF
+  JUMP_ARGS="-F /tmp/jump.cfg -o ProxyJump=jump"
+fi
+
 # === 2. SSH-туннель с фолбэком (фон) ===
 (
   while true; do
@@ -30,6 +51,7 @@ BACKEND_PORT=${SOCKS_BACKEND_PORT:-10800}
       esac
       echo "$(date) SSH: trying ${HOST}:${PORT}..."
       ssh -N -D 127.0.0.1:${BACKEND_PORT} \
+        ${JUMP_ARGS} \
         -o StrictHostKeyChecking=accept-new \
         -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
         -o ExitOnForwardFailure=yes -o TCPKeepAlive=yes \
@@ -104,7 +126,8 @@ if [ -n "$SOCKS_PORT" ]; then
       echo "auth strong"
       echo "allow ${SOCKS_USER}"
     else
-      echo "auth none"
+      echo "auth iponly"
+      echo "allow *"
     fi
     echo "parent 1000 socks5 127.0.0.1 ${BACKEND_PORT}"
     echo "socks -p${SOCKS_PORT} -i0.0.0.0"
@@ -115,7 +138,8 @@ if [ -n "$SOCKS_PORT" ]; then
         echo "auth strong"
         echo "allow ${SOCKS_USER}"
       else
-        echo "auth none"
+        echo "auth iponly"
+        echo "allow *"
       fi
       echo "parent 1000 socks5 127.0.0.1 ${BACKEND_PORT}"
       echo "proxy -n -p${HTTP_PORT} -i0.0.0.0"

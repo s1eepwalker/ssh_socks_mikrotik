@@ -164,6 +164,69 @@ External SOCKS5/HTTP client  ───┤    127.0.0.1:10800 ← ssh -N -D
 - Обе роли используют один `ssh -N -D 127.0.0.1:$SOCKS_BACKEND_PORT` как SOCKS5-upstream.
 - **TCP-only.** SSH `-D` UDP не поддерживает.
 
+### Подключение через промежуточный хост (ProxyJump)
+
+Нужно, когда до конечного сервера **нельзя достучаться напрямую**, а только через
+промежуточный («прыжковый») хост. Классика — конечный сервер за blackhole/NAT, и его
+sshd доступен лишь по **обратному туннелю**, который он сам держит до общедоступной
+точки встречи.
+
+Задаётся переменными `JUMP_*`. Если `JUMP_HOST` задан — **все** хосты из `SSH_HOSTS`
+идут через этот прыжок. `SSH_*` описывают конечный сервер (как его видно **с прыжкового
+хоста**), `JUMP_*` — сам прыжковый. У них разные ключи — монтируются оба в `/ssh`.
+
+#### Общая схема
+
+```
+ MikroTik (контейнер sshgate)
+   │  ssh -N -D 127.0.0.1:10800        ← SSH-сессия завершается на Srv2
+   │
+   ▼  TCP к Srv1
+ ┌───────────────────┐   ProxyJump    ┌────────────────────┐
+ │ Srv1  (jump)      │ ─────────────▶ │ Srv2  (target)     │ ──▶ интернет
+ │ JUMP_HOST:JUMP_PORT│ direct-tcpip  │ SSH_HOST:SSH_PORT   │   exit IP = Srv2
+ │ JUMP_USER          │  channel      │ SSH_USER            │
+ │ ключ JUMP_KEY      │               │ ключ SSH_KEY        │
+ └───────────────────┘               └────────────────────┘
+```
+
+Контейнер коннектится к **Srv1** и просит его открыть канал к **Srv2** — SSH-сессия
+(и `-D` SOCKS) терминируется на **Srv2**, поэтому весь прокси-трафик выходит в интернет
+**с IP Srv2**. Srv1 — только транзит, его шелл не используется.
+
+#### Частный случай: Srv2 за обратным туннелем (реальный сетап)
+
+`Srv2` (`hosterkg`) под blackhole для входящих, поэтому **сам** держит обратный туннель
+до `Srv1` (`radmin0` — общедоступная точка встречи):
+
+```
+ Srv2 (hosterkg):  autossh -N -R 127.0.0.1:22022:localhost:22  andrey@radmin0
+                   └─ пробрасывает свой sshd (:22) на loopback radmin0:22022
+
+ MikroTik контейнер:
+   JUMP_HOST=93.91.171.46  JUMP_PORT=22  JUMP_USER=andrey  JUMP_KEY=id_rsa-VSCODE   (Srv1=radmin0)
+   SSH_HOSTS=127.0.0.1:22022  SSH_USER=andrey  SSH_KEY=andrey                       (Srv2 через туннель)
+
+ Поток:
+   контейнер ──ssh──▶ radmin0 ──(loopback :22022 = обратный туннель)──▶ hosterkg sshd
+                                                                            │
+                                                                ssh -D выходит здесь → интернет (exit = hosterkg)
+```
+
+`SSH_HOST=127.0.0.1` — это loopback **radmin0** (так его видит прыжковый хост), а не
+контейнера. На прыжковом хосте контейнер аутентифицируется ключом `JUMP_KEY`, а на
+конечном (уже по ту сторону туннеля) — ключом `SSH_KEY`.
+
+#### Детали реализации
+
+- **Раздельные ключи + `IdentitiesOnly`.** entrypoint генерит `/tmp/jump.cfg` с блоком
+  `Host jump`; прыжку предлагается только `JUMP_KEY`, цели — только `SSH_KEY`.
+- **Host-key в конфиге, не флагом.** Дочерний ssh для прыжка **не наследует** `-o`-опции
+  из командной строки внешнего ssh, поэтому `StrictHostKeyChecking accept-new` прописан
+  внутри `Host jump`, иначе проверка ключа прыжка падает в headless-контейнере.
+- **Совместимо с фолбэком.** При нескольких `SSH_HOSTS` через один и тот же `JUMP_HOST`
+  перебираются все цели.
+
 ### Полная установка
 
 #### 1. Подготовка (общие шаги)
@@ -211,6 +274,14 @@ WinBox Files / SFTP / `scp`.
 # /container envs add list=sshgate-env key=SOCKS_USER value="myuser"   # включит auth
 # /container envs add list=sshgate-env key=SOCKS_PASS value="mypassword"
 # /container envs add list=sshgate-env key=HTTP_PORT  value="3128"      # требует SOCKS_PORT
+
+# Опционально — если до сервера нельзя напрямую, а только через прыжковый хост.
+# Тогда SSH_HOSTS — это цель, видимая С прыжкового (напр. обратный туннель на его
+# loopback), а JUMP_* — сам прыжковый. Ключи прыжка и цели монтируются оба в /ssh.
+# /container envs add list=sshgate-env key=SSH_HOSTS value="127.0.0.1:22022"
+# /container envs add list=sshgate-env key=JUMP_HOST value="93.91.171.46"
+# /container envs add list=sshgate-env key=JUMP_USER value="andrey"
+# /container envs add list=sshgate-env key=JUMP_KEY  value="id_rsa-VSCODE"
 ```
 
 #### 5. Контейнер
@@ -222,6 +293,15 @@ WinBox Files / SFTP / `scp`.
 ```
 
 Важно: **никакого `mounts=tun-dev`** — RouterOS сам кладёт `/dev/net/tun` в namespace.
+
+⚠️ **Второй и последующие контейнеры — уникальный `root-dir`.** Если на роутере уже есть другой контейнер (например `mtg`), `/container add` упадёт с `failure: root-dir already used by other container`. У каждого контейнера должен быть свой каталог распаковки — добавь `root-dir=<уникальное-имя>`:
+
+```routeros
+/container add file=sshgate.tar.gz interface=veth-sshgate envlist=sshgate-env \
+  mounts=ssh-key logging=yes start-on-boot=yes root-dir=sshgate-kg
+```
+
+Смотри, где лежат существующие, чтобы попасть на тот же носитель (внешний диск/USB, не внутренний flash): `/container print detail` → поле `root-dir`. Если у других, скажем, `usb1-part1/mtg` — задай `root-dir=usb1-part1/sshgate-kg`.
 
 #### 6. L3-роль: routing-rule на gateway контейнера
 
@@ -283,13 +363,18 @@ curl -x http://u:p@<router-ip>:3128 https://ifconfig.me
 | `SSH_KEY` | `id_ed25519` | Имя файла ключа в `/ssh` |
 | `RETRY_DELAY` | `5` | Пауза в секундах после полного перебора серверов |
 | `SOCKS_BACKEND_PORT` | `10800` | Локальный 127.0.0.1 порт SSH `-D` (внутренний) |
+| **Промежуточный хост (ProxyJump, опц.)** | | |
+| `JUMP_HOST` | — | Прыжковый хост. Если задан — все `SSH_HOSTS` идут через него (ProxyJump). Без — прямое подключение |
+| `JUMP_PORT` | `22` | Порт прыжкового хоста |
+| `JUMP_USER` | `root` | Пользователь прыжкового хоста |
+| `JUMP_KEY` | `=SSH_KEY` | Имя файла ключа прыжкового хоста в `/ssh` |
 | **L3-роль (всегда активна)** | | |
 | `TUN_NAME` | `tun0` | Имя TUN-устройства внутри namespace |
 | `TUN_ADDR` | `198.18.0.1/30` | Адрес на tun0 (CGNAT RFC 6815) |
 | **App-listener (opt-in)** | | |
 | `SOCKS_PORT` | — | Внешний порт SOCKS5. Если задан → 3proxy слушает. Без — листенер не запускается. |
 | `HTTP_PORT` | — | Внешний порт HTTP. Требует `SOCKS_PORT`. |
-| `SOCKS_USER` | — | Логин для auth. Без — `auth none` (Telegram-совместимо). |
+| `SOCKS_USER` | — | Логин для auth. Без — открытый доступ без логина (`auth iponly`, Telegram-совместимо). |
 | `SOCKS_PASS` | — | Пароль (требует `SOCKS_USER`). |
 
 ### Миграция со старых контейнеров
